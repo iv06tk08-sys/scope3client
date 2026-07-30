@@ -1,0 +1,21 @@
+Package: scope3federatedclient
+Title: Client for Federated Scope 3 Supplier Analysis
+Version: 0.1.0
+Authors@R: person("Prototype", "Maintainer", email = "prototype@example.com", role = c("aut", "cre"))
+Author: Prototype Maintainer [aut, cre]
+Maintainer: Prototype Maintainer <prototype@example.com>
+Description: Aggregate-only httr2 client for querying supplier Scope 3 Category 3
+    APIs, combining sufficient statistics into global emissions results, and
+    writing comparison outputs.
+License: MIT + file LICENSE
+Depends:
+    R (>= 4.1.0)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Imports:
+    dplyr,
+    httr2,
+    tibble
+Suggests:
+    testthat
+Config/testthat/edition: 3
