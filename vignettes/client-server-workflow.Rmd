@@ -1,0 +1,254 @@
+---
+title: "Client-server Scope 3 workflow"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Client-server Scope 3 workflow}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## Purpose
+
+This vignette shows how the two-package architecture is used.
+
+The architecture is:
+
+```text
+scope3supplier server package
+  stores supplier uploads server-side
+  stores emission factors server-side
+  calculates emissions server-side
+  exposes aggregate-only API endpoints
+
+scope3federatedclient client package
+  runs on another laptop
+  knows only API URLs and supplier IDs
+  receives aggregate outputs only
+  produces the emissions summary/report
+```
+
+The client laptop does not need local supplier `.rds` files. It only needs the
+client package and the API URL.
+
+## 1. Install the Packages
+
+During local development from this repository, install both packages from their
+folders:
+
+```{r install-local}
+install.packages(
+  "packages/scope3supplier",
+  repos = NULL,
+  type = "source"
+)
+
+install.packages(
+  "packages/scope3federatedclient",
+  repos = NULL,
+  type = "source"
+)
+```
+
+After you publish the packages to separate GitHub repositories, the client laptop
+only needs the client package:
+
+```{r install-github-client}
+remotes::install_github("YOUR-GITHUB-USER/scope3federatedclient")
+```
+
+The server machine needs the server package:
+
+```{r install-github-server}
+remotes::install_github("YOUR-GITHUB-USER/scope3supplier")
+```
+
+## 2. Start the Server
+
+Run this on the server machine, not on the client laptop.
+
+For this prototype, we create server-side example data from the synthetic Excel
+workbook. In production, suppliers would upload their own files through the
+upload endpoint instead.
+
+```{r server-setup}
+library(scope3supplier)
+
+create_example_server_data(
+  workbook_path = "data/synthetic_scope3_category3_raw_data.xlsx",
+  data_dir = "server-data"
+)
+```
+
+This writes server-owned data under:
+
+```text
+server-data/
+  emission_factors/
+  suppliers/
+```
+
+Then start the Plumber API:
+
+```{r server-start}
+library(scope3supplier)
+
+start_supplier_api(
+  data_dir = "server-data",
+  host = "127.0.0.1",
+  port = 8080,
+  minimum_group_size = 10
+)
+```
+
+Leave this R process running. The server exposes endpoints like:
+
+```text
+GET /health
+GET /emission-factors/version
+GET /suppliers/SUPPLIER_APAC_ENERGY/record-count
+GET /suppliers/SUPPLIER_APAC_ENERGY/emissions/total
+GET /suppliers/SUPPLIER_APAC_ENERGY/emissions/by-activity
+GET /suppliers/SUPPLIER_APAC_ENERGY/emissions/sufficient-statistics
+```
+
+## 3. Optional: Upload Supplier Data
+
+Instead of creating example data, a supplier can upload a CSV file to the server.
+The upload endpoint stores the data server-side and returns metadata only.
+
+```{bash upload-example}
+curl --data-binary @supplier.csv \
+  "http://127.0.0.1:8080/suppliers/SUPPLIER_001/upload?filename=supplier.csv"
+```
+
+The uploaded file must contain at least:
+
+```text
+supplier_id
+country
+activity_type
+quantity
+unit
+```
+
+## 4. Run the Client From Another Laptop
+
+This is the part you would run on a separate laptop with only the client package
+installed.
+
+```{r client-analysis}
+library(scope3federatedclient)
+
+suppliers <- data.frame(
+  supplier_id = c(
+    "SUPPLIER_AMERICAS_ENERGY",
+    "SUPPLIER_APAC_ENERGY",
+    "SUPPLIER_EUROPE_UTILITIES"
+  ),
+  base_url = rep("http://127.0.0.1:8080", 3)
+)
+
+result <- run_federated_analysis(
+  suppliers = suppliers,
+  output_dir = "outputs"
+)
+```
+
+The result object contains:
+
+```{r inspect-result}
+names(result)
+```
+
+The main emissions summary is:
+
+```{r federated-summary}
+result$federated
+```
+
+To see the activity-level totals:
+
+```{r activity-totals}
+result$federated$activity_totals
+```
+
+To see the formula used by the architecture:
+
+```{r formula}
+emission_calculation_formula()
+```
+
+## 5. Files Written by the Client
+
+If `output_dir = "outputs"` is supplied, the client writes:
+
+```text
+outputs/federated_report.md
+```
+
+If a reference/centralised result is also supplied, it also writes:
+
+```text
+outputs/centralised_federated_comparison.csv
+```
+
+In the normal another-laptop setup, the client does not need a centralised
+reference result. It can still obtain the federated emissions summary from the
+API.
+
+## 6. What Data the Client Receives
+
+The client receives only aggregate fields such as:
+
+```text
+supplier_id
+n
+total_emissions_tco2e
+activity_type
+sum_emissions_tco2e
+sum_squares_emissions_tco2e2
+```
+
+The client does not receive:
+
+```text
+record_id
+site_id
+site_name
+reporting_month
+quantity
+invoice_reference
+raw activity records
+```
+
+## 7. How the Summary Is Computed
+
+The server calculates record emissions locally:
+
+```text
+total_emissions_tco2e =
+  quantity *
+  (upstream_wtt_factor_kgco2e_per_unit + td_loss_factor_kgco2e_per_unit) /
+  1000
+```
+
+The client calculates global results from sufficient statistics:
+
+```text
+global_total = sum(supplier totals)
+global_mean = sum_supplier_sum_emissions / sum_supplier_n
+global_sample_variance =
+  (sum_supplier_sum_squares - sum_supplier_sum_emissions^2 / sum_supplier_n) /
+  (sum_supplier_n - 1)
+```
+
+That is why the client can see the emission summary without seeing raw supplier
+records.

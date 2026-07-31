@@ -59,3 +59,20 @@ emission_calculation_formula()
 
 to see the server-side record formula and the client-side federated aggregation
 formula.
+
+## Client-server workflow article
+
+The client-server workflow is documented in:
+
+```text
+vignettes/client-server-workflow.Rmd
+```
+
+An installed Markdown copy is also available at:
+
+```r
+system.file("doc", "client-server-workflow.md", package = "scope3federatedclient")
+```
+
+It demonstrates how to start the `scope3supplier` API and obtain emissions
+results from `scope3federatedclient` using only API URLs.
